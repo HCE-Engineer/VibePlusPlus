@@ -23,4 +23,5 @@ bin/akis build ornek.aks -o ornek.py   # çalıştırırken PYTHONPATH'e runtime
 ## Durum
 - Faz 1 (transpiler) bitti, DUR 1 tamam.
 - Şartname v0.1: H'nin kararıyla pilottan önce eksikler dolduruldu (`spec/CHANGELOG.md`).
+- Şartname v0.2: İngilizceye çevrildi, `use py` izin listesi ve efekt zorunluluğu eklendi (`spec/CHANGELOG.md`).
 - Sıradaki: faz 2, 35 görev yazılacak (5 dev + 30 test), DUR 2'de görev listesi H'ye sunulacak.

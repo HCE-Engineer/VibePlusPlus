@@ -21,6 +21,24 @@ EFFECTS = ("fs", "net", "io", "time", "rand")
 
 PY_RESERVED = set(keyword.kwlist) | set(keyword.softkwlist) | {"_rt"}
 
+# `use py` allowlist (v0.2): module -> effects every imported function must declare. Only these modules are
+# imported at check time (exact module path; submodules must be listed themselves).
+PY_MODULES = {
+    **{m: () for m in ("math", "cmath", "statistics", "json", "re", "string", "itertools", "functools",
+                       "operator", "collections", "heapq", "bisect", "fractions", "decimal", "textwrap",
+                       "unicodedata", "difflib", "hashlib", "base64", "binascii", "struct", "copy", "colorsys",
+                       "html", "csv", "fnmatch", "urllib.parse")},
+    **{m: ("fs",) for m in ("os", "os.path", "pathlib", "shutil", "glob", "tempfile")},
+    **{m: ("net",) for m in ("urllib.request", "http.client", "socket", "ssl")},
+    **{m: ("time",) for m in ("time", "datetime")},
+    **{m: ("rand",) for m in ("random", "secrets", "uuid")},
+}
+# Functions that run processes or change the interpreter: never importable, whatever effects are declared.
+PY_DENIED = ("system", "popen", "exec", "spawn", "fork", "kill", "_exit", "abort", "startfile", "posix_spawn",
+             "setuid", "setgid", "chroot", "putenv", "unsetenv", "eval", "compile")
+PY_ALLOWED_HELP = "allowed: math statistics json re string itertools functools collections heapq bisect " \
+                  "datetime time random os os.path pathlib shutil glob urllib.parse ..."
+
 BUILTIN_HELP = ("builtins: see the spec's builtin list (len sum min max avg range enumerate zip keys values items get "
                 "append pop split join strip replace upper lower starts_with find ...)")
 
@@ -249,9 +267,20 @@ class Checker:
     def declare_use(self, u):
         mod = ".".join(u.path[:-1])
         attr = u.path[-1]
+        effs = self.check_effects(u.effects, u.name)
         if len(u.path) < 2:
             self.err("E-TYPE-02", u, f"'use py {attr}' needs a module path", "write use py module.name as alias: (T) -> R")
+        elif mod not in PY_MODULES:
+            self.err("E-EFFECT-04", u, f"python module '{mod}' is not allowed in 'use py'", PY_ALLOWED_HELP)
+        elif attr.startswith(PY_DENIED):
+            self.err("E-EFFECT-04", u, f"'{mod}.{attr}' is not allowed in 'use py'",
+                     "use the builtins (read_text, write_text, print) or an allowed function")
         else:
+            missing = [e for e in PY_MODULES[mod] if e not in effs]
+            if missing:
+                need = " ".join("!" + e for e in missing)
+                self.err("E-EFFECT-03", u, f"'use py {mod}.{attr}' has effect {need} but the import does not declare it",
+                         f"add {need} after the return type: use py {mod}.{attr} as {u.name}: (...) -> R {need}")
             try:
                 m = importlib.import_module(mod)
                 if not hasattr(m, attr):
@@ -260,7 +289,6 @@ class Checker:
                 self.err("E-TYPE-02", u, f"python module '{mod}' cannot be imported", "check the module name")
         params = [(f"_{i}", self.resolve(p, allow_any=True)) for i, p in enumerate(u.params)]
         ret = self.resolve(u.ret, allow_any=True)
-        effs = self.check_effects(u.effects, u.name)
         if u.name in self.fns:
             self.err("E-TYPE-10", u, f"duplicate definition of '{u.name}'", "rename one of them")
         pyname = u.name + "_" if u.name in PY_RESERVED else u.name
@@ -858,6 +886,8 @@ class Checker:
         k = st.kind
         names = {"SWhere": "where", "SMap": "map", "SSortBy": "sort_by", "SCountBy": "count_by",
                  "SGroupBy": "group_by", "STake": "take", "SSkip": "skip", "SMaxBy": "max_by", "SMinBy": "min_by"}
+        if k == "SAccess":
+            return self.with_it_val(strip_opt(cur), st.expr)
         if k == "SCall":
             if st.desc:
                 if ALIASES.get(st.name, st.name) != "sort" or st.name in self.fns:

@@ -7,7 +7,7 @@ import pytest
 from .conftest import ROOT, build
 
 SPEC = open(os.path.join(ROOT, "spec", "AKIS_SPEC.md"), encoding="utf-8").read()
-EXAMPLES = re.findall(r"```\n(.*?)```", SPEC.split("### Örnek programlar")[1], re.S)
+EXAMPLES = re.findall(r"```\n(.*?)```", SPEC.split("### Example programs")[1], re.S)
 
 
 def test_four_examples_present():
@@ -16,7 +16,7 @@ def test_four_examples_present():
 
 def test_spec_file_equals_protocol_section_2():
     proto = open(os.path.join(ROOT, "AKIS_DENEY.md"), encoding="utf-8").read()
-    sec2 = proto.split("## 2. Akış v0.1 dil şartnamesi")[1].split("\n---\n\n## 3.")[0]
+    sec2 = proto.split("## 2. Akış v0.2 dil şartnamesi")[1].split("\n---\n\n## 3.")[0]
     body = SPEC.split("\n", 2)[2]
     assert body.strip() in sec2
     assert sec2.strip().endswith(body.strip())

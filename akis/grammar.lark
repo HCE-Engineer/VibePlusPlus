@@ -75,6 +75,9 @@ ifx: "if" coalesce "then" ifbr "else" ifbr
       | "skip" sexpr                      -> st_skip
       | "max_by" sexpr                    -> st_max_by
       | "min_by" sexpr                    -> st_min_by
+      | "." NAME                          -> st_field
+      | "." INT                           -> st_tindex
+      | "." FLOAT                         -> st_tindex2
       | NAME [call_args] [DESC] [QMARK] [COALESCE sexpr] -> st_call
 call_args: "(" [args] ")"
 ?sexpr: coalesce | ifx

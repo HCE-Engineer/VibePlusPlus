@@ -1,5 +1,25 @@
 # Akış şartname değişiklikleri
 
+## v0.2 — 2026-11-08 (pilottan önce, H'nin kararıyla)
+
+Test görevleri hâlâ yazılmadı; değişiklikler görev görülmeden, transpiler üzerinde elle denenen 37 örnek programa
+göre yapıldı.
+
+- **Şartname İngilizce.** Görev metni, imza ve kod İngilizce; Türkçe kurallar bağlamda dil karışımı ve fazladan girdi
+  token'ı demekti. İçerik aynı, örnek programlar birebir aynı.
+- **`use py` izin listesi.** Sadece listelenen modüller alınabilir (`E-EFFECT-04`); modülün efekti içe aktarmada
+  yazılmak zorunda (`E-EFFECT-03`, örn. `os.getcwd` için `!fs`). `os.system`, `popen`, `exec*`, `spawn*`, `fork`,
+  `kill`, `eval` hiçbir zaman alınamaz. Gerekçe: v0.1'de `use py subprocess.run as run: (str) -> any` ve efektsiz
+  `os.getcwd` saf fonksiyon olarak derleniyordu, yani E1 tek satırla deliniyordu; ayrıca denetleyici her modülü denetim
+  sırasında `import` ediyordu. Artık sadece izinli modüller import edilir.
+
+Derleyicinin şartnamede yazmadan kabul ettikleri:
+- Erişim aşaması `xs | max_by .1 | .0`: `| .alan` / `| .N` önceki değerin kendisine uygulanır (eleman başına değil;
+  eleman başına için `map .0`). Gerekçe: modelin doğal yazdığı bu biçim v0.1'de belirsiz bir sözdizimi hatası veriyordu.
+
+Değişmeyenler: `T?` gevşek kalmaya devam ediyor (`T` yerine kullanılabilir, çalışma anında `None` hatası verebilir).
+Katılaştırmak DUR 3 pilot verisine göre karar verilecek bir aday.
+
 ## v0.1 — 2026-11-08 (pilottan önce, H'nin kararıyla)
 
 H: "dilin bütün amacı senin rahat yazabilmen; en rahat yol neyse eksikleri doldur."

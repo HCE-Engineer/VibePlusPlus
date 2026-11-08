@@ -175,3 +175,14 @@ def test_compiler_never_crashes_on_mutated_input():
             s = s[:p] + rnd.choice(toks) + s[p:] if rnd.random() < 0.5 else s[:p] + s[p + rnd.randint(1, 3):]
         code, diags = compile_source(s)
         assert code or diags
+
+
+def test_use_py_allowlist_and_module_effects():
+    # modules outside the allowlist are rejected (and not imported at check time)
+    assert codes("use py subprocess.run as run: (str) -> any\nfn f() -> none\n  run(\"ls\")\n") == ["E-EFFECT-04"]
+    assert codes("use py os.system as sh: (str) -> int !fs\nfn f() -> int !fs\n  sh(\"ls\")\n") == ["E-EFFECT-04"]
+    # an allowed module's effects must be declared on the import
+    assert codes("use py os.getcwd as cwd: () -> str\nfn f() -> str\n  cwd()\n") == ["E-EFFECT-03"]
+    assert codes("use py random.choice as pick: ([int]) -> int\nfn f() -> int !rand\n  pick([1])\n") == ["E-EFFECT-03"]
+    assert codes("use py os.getcwd as cwd: () -> str !fs\nfn f() -> str !fs\n  cwd()\n") == []
+    assert codes("use py math.gcd as gcd: (int, int) -> int\nfn f() -> int\n  gcd(4, 6)\n") == []

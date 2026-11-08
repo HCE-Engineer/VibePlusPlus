@@ -229,6 +229,8 @@ class Gen:
                 code = f"_rt.coalesce(lambda: {code}, lambda: {self.e(st.default)})"
             return code
         lam = f"lambda it: {self.e(st.expr)}"
+        if k == "SAccess":
+            return f"({lam})({cur})"
         if k == "SWhere":
             return f"_rt.where({cur}, {lam})"
         if k == "SMap":

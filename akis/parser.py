@@ -256,6 +256,16 @@ class ToAst(Transformer):
         return self._n("SCall", meta, name=str(name), args=args, has_parens=cargs is not None,
                        desc=desc is not None, qmark=q is not None, default=default)
 
+    # `xs | max_by .1 | .0`: field/tuple access on the whole previous value (not per element)
+    def st_field(self, meta, ch):
+        return self._n("SAccess", meta, expr=self.dot_field(meta, ch))
+
+    def st_tindex(self, meta, ch):
+        return self._n("SAccess", meta, expr=self.dot_index(meta, ch))
+
+    def st_tindex2(self, meta, ch):
+        return self._n("SAccess", meta, expr=self.dot_index2(meta, ch))
+
     def st_max_by(self, meta, ch):
         return self._n("SMaxBy", meta, expr=ch[0])
 

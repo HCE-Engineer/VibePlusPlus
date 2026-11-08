@@ -1,4 +1,4 @@
-# Akış v0.1 transpiler
+# Akış v0.2 transpiler
 
 Akış (`.aks`) → Python 3.11. Şartname: `spec/AKIS_SPEC.md`, değişiklikler: `spec/CHANGELOG.md`. Parser: Lark (LALR + girinti post-lexer). Tip ve efekt denetimi statik;
 denetimden geçmeyen kod Python'a çevrilmez.
@@ -41,6 +41,8 @@ bin/akis build sol.aks -o sol.py  # üretilen kod `import akis_rt` yapar: PYTHON
 | `E-TYPE-12` | Hesaplanan değer kullanılmıyor (`sort(xs)` tek başına, `x == 1` yerine `x = 1`) |
 | `E-EFFECT-01` | Kural E1 ihlali |
 | `E-EFFECT-02` | Bilinmeyen efekt adı |
+| `E-EFFECT-03` | `use py` içe aktarmasında modülün efekti yazılmamış |
+| `E-EFFECT-04` | `use py` ile izin listesi dışı modül veya yasak fonksiyon (`os.system`, `eval`, ...) |
 | `E-NEST-01` | Kural N1 ihlali (3 seviyeden fazla) |
 | `E-NAMEDARG-01` | Kural N2 ihlali; kayıt oluştururken isimsiz alan |
 | `E-QMARK-01` | Kural E2 ihlali |
@@ -69,3 +71,6 @@ bin/akis build sol.aks -o sol.py  # üretilen kod `import akis_rt` yapar: PYTHON
     `startswith/endswith/isdigit/isalpha/isspace/sorted/reversed/mean/to_dict` yazımları, `join` argümanlarının
     iki sırası (`join(xs, sep)` ve `", ".join(xs)`).
 12. **`-> R` yazılmazsa** dönüş tipi `none`.
+13. **Erişim aşaması** `xs | max_by .1 | .0`: `| .alan` / `| .N` önceki değerin tamamına uygulanır (eleman başına
+    için `map .0`).
+14. **`use py` modülleri** denetim sırasında sadece izin listesindeyse import edilir (`checker.PY_MODULES`).

@@ -22,87 +22,87 @@ Bilinen dezavantaj: model Akış'ı eğitimde hiç görmedi. Şartname her istem
 
 ---
 
-## 2. Akış v0.1 dil şartnamesi
+## 2. Akış v0.2 dil şartnamesi
 
-Bu bölüm aynı zamanda deneyde modele verilecek şartnamedir (`spec/AKIS_SPEC.md` olarak ayrıca kaydet, ikisi aynı kalsın).
+Bu bölüm aynı zamanda deneyde modele verilecek şartnamedir (`spec/AKIS_SPEC.md` olarak ayrıca kaydet, ikisi aynı kalsın. v0.2'den itibaren modele giden metin İngilizce).
 
-### Dosya
-- Uzantı `.aks`, UTF-8. Girinti 2 boşluk, tab yasak.
-- Üst düzey öğeler: `use`, `type`, `fn`. Yorum: `#`.
+### File
+- Extension `.aks`, UTF-8. Indent 2 spaces, tabs are forbidden.
+- Top-level items: `use`, `type`, `fn`. Comment: `#`.
 
-### Tipler
+### Types
 ```
-int  float  str  bool  none  any(sadece use py içinde)
-[T]          liste
-{K: V}       sözlük
-(A, B)       demet; elemanlara .0 .1 ile erişilir
-T?           opsiyonel: değer ya da none
-T!           hata dönebilir
-type Part = {name: str, weight: float}     # kayıt tipi
-Part(name: "mil", weight: 2.5)             # kayıt oluşturma, isimli alanlar zorunlu
+int  float  str  bool  none  any(only inside use py)
+[T]          list
+{K: V}       dict
+(A, B)       tuple; elements are accessed with .0 .1
+T?           optional: a value or none
+T!           may return an error
+type Part = {name: str, weight: float}     # record type
+Part(name: "mil", weight: 2.5)             # record construction, named fields required
 ```
 
-### Fonksiyon
+### Functions
 ```
 fn name(a: T, b: U) -> R !fs !io
-  gövde
+  body
 ```
-- Gövdenin son satırındaki ifade dönüş değeridir. Erken dönüş için `return expr`.
-- Efektler: `!fs` (dosya), `!net` (ağ), `!io` (konsol), `!time` (saat), `!rand` (rastgele). Efekt yazılmamış fonksiyon saftır.
-- **Kural E1:** `f`, `g`'yi çağırıyorsa `g`'nin tüm efektleri `f`'nin imzasında olmalı.
-- **Kural E2:** `?` operatörü sadece dönüş tipi `T!` olan fonksiyonda kullanılabilir.
-- **Kural N1:** Blok iç içeliği en fazla 3 seviye (fonksiyon gövdesi ve aynı satırdaki tek deyimli blok sayılmaz). Fazlası derleme hatası.
-- **Kural N2:** 3 veya daha fazla parametreli kendi fonksiyonlarına yapılan çağrılarda isimli argüman zorunlu: `clamp(value: x, low: 0, high: 255)`. Yerleşik fonksiyonlar muaf.
-- Çağrı üç biçimde yazılabilir, üçü aynıdır: `f(x, a)`, `x.f(a)`, `x | f(a)`.
+- The expression on the last line of the body is the return value. Early return: `return expr`.
+- Effects: `!fs` (files), `!net` (network), `!io` (console), `!time` (clock), `!rand` (random). A function with no effects written is pure.
+- **Rule E1:** if `f` calls `g`, all effects of `g` must be in `f`'s signature.
+- **Rule E2:** the `?` operator may only be used in a function whose return type is `T!`.
+- **Rule N1:** block nesting is at most 3 levels (the function body and a single-statement block on the same line do not count). More is a compile error.
+- **Rule N2:** calls to your own functions with 3 or more parameters must use named arguments: `clamp(value: x, low: 0, high: 255)`. Builtins are exempt.
+- A call can be written in three equivalent forms: `f(x, a)`, `x.f(a)`, `x | f(a)`.
 
-### Bağlama
+### Bindings
 ```
-let x = expr              # değiştirilemez
-let x: [int] = []         # tip yazılabilir
-var total = 0             # değiştirilebilir
+let x = expr              # immutable
+let x: [int] = []         # type may be written
+var total = 0             # mutable
 total = total + 1
 total += 1                # += -= *= /= //= %=
-let a, b = pair           # demet açma
+let a, b = pair           # tuple unpacking
 a, b = b, a
-xs[i] = v                 # var üzerinde eleman ataması; d[k] = v, p.alan = v
+xs[i] = v                 # element assignment on a var; d[k] = v, p.field = v
 ```
 
-### Akış (pipeline)
+### Pipelines
 ```
-expr | aşama | aşama
+expr | stage | stage
 ```
-Aşamalar:
-| Aşama | Anlamı |
+Stages:
+| Stage | Meaning |
 |---|---|
-| `f` | `f(önceki)` |
-| `f(a, b)` | `f(önceki, a, b)` |
-| `where P` | P doğru olanları tut |
-| `map E` | her elemanı E'ye dönüştür |
-| `sort_by K` / `sort_by K desc` | K anahtarına göre sırala (kararlı) |
-| `sort` / `sort desc` | değere göre sırala |
-| `max_by K`, `min_by K` | K'si en büyük / en küçük eleman; boş listede hata |
-| `count_by K` | `[(anahtar, adet)]`, ilk görülme sırasıyla |
-| `group_by K` | `{anahtar: [elemanlar]}` |
-| `take n`, `skip n` | ilk n / ilk n hariç |
-| `sum`, `min`, `max`, `avg`, `len`, `unique`, `flatten`, `reverse` | adı gibi; `min`/`max`/`avg` boş listede hata |
-| `first` | `T?` döner |
+| `f` | `f(previous)` |
+| `f(a, b)` | `f(previous, a, b)` |
+| `where P` | keep elements where P is true |
+| `map E` | transform each element to E |
+| `sort_by K` / `sort_by K desc` | sort by key K (stable) |
+| `sort` / `sort desc` | sort by value |
+| `max_by K`, `min_by K` | element with the largest / smallest K; error on an empty list |
+| `count_by K` | `[(key, count)]`, in first-seen order |
+| `group_by K` | `{key: [elements]}` |
+| `take n`, `skip n` | first n / all but the first n |
+| `sum`, `min`, `max`, `avg`, `len`, `unique`, `flatten`, `reverse` | as named; `min`/`max`/`avg` error on an empty list |
+| `first` | returns `T?` |
 
-- Aşama içinde `it` mevcut eleman, `.alan` kısaltması `it.alan` demek, `.0` demetin ilk elemanı.
-- Bir aşamanın ifadesi bir sonraki üst düzey `|` işaretine kadar uzanır.
-- Çok satırlı akışta devam satırı 4 boşluk girinti ve `|` ile başlar.
-- `|` sadece akış operatörüdür; bit düzeyi işlem yok.
-- Sözlük üzerinde akış `(anahtar, değer)` demetleri verir: `d | sort_by .1 desc | map .0`.
-- Akış içeren bir ifade başka bir ifadenin parçasıysa parantez: `if (xs | len) > 3:`.
+- Inside a stage `it` is the current element, `.field` is short for `it.field`, `.0` is the first element of a tuple.
+- A stage's expression extends to the next top-level `|`.
+- In a multi-line pipeline, a continuation line is indented 4 spaces and starts with `|`.
+- `|` is only the pipeline operator; there are no bitwise operations.
+- A pipeline over a dict yields `(key, value)` tuples: `d | sort_by .1 desc | map .0`.
+- If an expression containing a pipeline is part of another expression, parenthesise it: `if (xs | len) > 3:`.
 
-### Hata ve opsiyonel
+### Errors and optionals
 ```
-read_text(path)?          # hata ise fonksiyondan aynı hatayla çık
-fail("negatif kütle")     # hata üret
-to_int(s) ?? 0            # hata veya none ise varsayılan
-d[k] ?? 0                 # olmayan anahtar / aralık dışı indeks de hatadır
+read_text(path)?          # on error, return from the function with the same error
+fail("negative mass")      # raise an error
+to_int(s) ?? 0            # default if error or none
+d[k] ?? 0                 # a missing key / out-of-range index is also an error
 ```
 
-### Kontrol
+### Control flow
 ```
 if c:
   ...
@@ -110,28 +110,37 @@ elif c:
   ...
 else:
   ...
-let y = if c then a else b     # tek satır ifade
+let y = if c then a else b     # single-line expression
 for x in xs:
   ...
 for i, x in enumerate(xs):
   ...
 while c:
   ...
-if x < 0: return 0             # tek deyimli blok aynı satırda olabilir
+if x < 0: return 0             # a single-statement block may be on the same line
 ```
-`break`, `continue` döngü içinde kullanılır. Son satırdaki `if/elif/else` dallarının son ifadesi dönüş değeridir.
+`break` and `continue` are used inside loops. When `if/elif/else` is the last line, the last expression of each branch is the return value.
 
-### Operatörler ve değerler
-`+ - * / // % ** == != < <= > >= and or not in`. `true`, `false`, `none`. Metin `"..."`, içinde `{x}` ya da `{x:.2f}` ile değer yerleştirme. Liste `[1, 2]`, sözlük `{"a": 1}`, indeksleme `xs[i]`, `xs[-1]`, dilim `xs[a:b]` (liste ve metin). Liste üreteci `[E for x in xs if P]` de geçerlidir.
+### Operators and values
+`+ - * / // % ** == != < <= > >= and or not in`. `true`, `false`, `none`. Strings `"..."`, with `{x}` or `{x:.2f}` interpolation inside. List `[1, 2]`, dict `{"a": 1}`, indexing `xs[i]`, `xs[-1]`, slice `xs[a:b]` (lists and strings). List comprehensions `[E for x in xs if P]` are also valid.
 
-### Python ile birlikte çalışma
+### Python interop
 ```
 use py math.sqrt as sqrt: (float) -> float
 use py json.loads as parse_json: (str) -> any!
+use py os.path.exists as exists: (str) -> bool !fs
 ```
-İçe aktarılan her Python fonksiyonunun tipi ve efektleri yazılmak zorunda.
+Every imported Python function must have its type and effects written.
+Only these modules are allowed; functions from the module must declare the listed effect:
+- pure: `math cmath statistics json re string itertools functools operator collections heapq bisect fractions decimal textwrap unicodedata difflib hashlib base64 binascii struct copy colorsys html csv fnmatch urllib.parse`
+- `!fs`: `os os.path pathlib shutil glob tempfile`
+- `!net`: `urllib.request http.client socket ssl`
+- `!time`: `time datetime`
+- `!rand`: `random secrets uuid`
 
-### Yerleşik fonksiyonlar
+Process and interpreter functions (`os.system`, `os.popen`, `exec*`, `spawn*`, `fork`, `kill`, `eval`, ...) are never allowed.
+
+### Builtin functions
 ```
 read_text(path: str) -> str!            !fs
 write_text(path: str, text: str) -> none!   !fs
@@ -144,31 +153,31 @@ strip(s: str) -> str
 join(xs: [str], sep: str) -> str
 to_int(s: str) -> int!
 to_float(s: str) -> float!
-parse_csv(text: str) -> [{str: str}]    # ilk satır başlık
-fail(msg: str)                          # sadece T! dönen fonksiyonda
+parse_csv(text: str) -> [{str: str}]    # first line is the header
+fail(msg: str)                          # only in a function returning T!
 ```
-Diğerleri (hepsi saf):
+Others (all pure):
 ```
-sayı:   abs round(x, n) min max sqrt floor ceil log exp int(x) float(x) str(x)
-liste:  len sum avg unique flatten reverse sort first last take(xs, n) skip(xs, n)
+number: abs round(x, n) min max sqrt floor ceil log exp int(x) float(x) str(x)
+list:   len sum avg unique flatten reverse sort first last take(xs, n) skip(xs, n)
         range(n) range(a, b) range(a, b, step) enumerate(xs) zip(a, b) any(xs) all(xs)
-        find(xs, x) count(xs, x)            # find: yoksa -1
-        append(xs, x) pop(xs)               # yerinde değiştirir, xs bir var olmalı
-sözlük: keys values items get(d, k) get(d, k, default) dict(pairs)
-metin:  split(s) split(s, sep) join(xs, sep) strip lstrip rstrip upper lower
+        find(xs, x) count(xs, x)            # find: -1 if absent
+        append(xs, x) pop(xs)               # modify in place, xs must be a var
+dict:   keys values items get(d, k) get(d, k, default) dict(pairs)
+string: split(s) split(s, sep) join(xs, sep) strip lstrip rstrip upper lower
         replace(s, old, new) starts_with ends_with chars is_digit is_alpha is_space
         ord chr find(s, sub) count(s, sub)
 ```
-`first`, `last`, `get(d, k)` → `T?`. `int(s)`, `float(s)` geçersiz metinde hata verir (`?? 0` ile yakalanır).
+`first`, `last`, `get(d, k)` → `T?`. `int(s)`, `float(s)` raise an error on invalid text (catch with `?? 0`).
 
-### Derleyici hata çıktısı
-Her hata tek satır JSON:
+### Compiler error output
+Each error is one line of JSON:
 ```
 {"code": "E-EFFECT-01", "at": "sol.aks:4:3", "msg": "pure fn 'summary' calls 'read_text' (effect !fs)", "fix": "add !fs to 'summary' signature"}
 ```
-Kodlar: `E-SYNTAX-*`, `E-TYPE-*`, `E-EFFECT-*`, `E-NEST-01`, `E-NAMEDARG-01`, `E-QMARK-01`.
+Codes: `E-SYNTAX-*`, `E-TYPE-*`, `E-EFFECT-*`, `E-NEST-01`, `E-NAMEDARG-01`, `E-QMARK-01`.
 
-### Örnek programlar
+### Example programs
 ```
 type Part = {name: str, weight: float}
 

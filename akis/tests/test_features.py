@@ -322,3 +322,20 @@ fn lenient() -> bool
     assert m.mean([]) == 0.0 and m.mean([1.0, 2.0]) == 1.5
     assert m.inv({"a": 1}) == {1: "a"}
     assert m.lenient() is True
+
+
+def test_v02_access_stage_on_whole_value():
+    m = build('''
+fn best(d: {str: int}) -> str
+  d | max_by .1 | .0
+
+type P = {name: str, w: float}
+fn heaviest(ps: [P]) -> str
+  ps | max_by .w | .name
+
+fn names(ps: [(str, int)]) -> [str]
+  ps | map .0
+''')
+    assert m.best({"a": 1, "b": 3, "c": 2}) == "b"
+    assert m.heaviest([{"name": "x", "w": 1.0}, {"name": "y", "w": 5.0}]) == "y"
+    assert m.names([("a", 1), ("b", 2)]) == ["a", "b"]
