@@ -27,6 +27,10 @@ class Node:
         return f"{self.kind}({', '.join(f'{k}={v!r}' for k, v in f.items())})"
 
 
+class InlineBlock(list):
+    """A one-statement block written on the header line (`if c: return x`); not counted by rule N1."""
+
+
 class AksIndenter(Indenter):
     NL_type = "_NL"
     OPEN_PAREN_types = ["LPAR", "LSQB", "LBRACE"]
@@ -55,7 +59,7 @@ def _tpos(meta):
     return (meta.line, meta.column) if not meta.empty else (0, 0)
 
 
-_ESC = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", '"': '"', "{": "{", "}": "}", "0": "\0"}
+_ESC = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", '"': '"', "'": "'", "{": "{", "}": "}", "0": "\0"}
 
 
 @v_args(meta=True)
@@ -152,6 +156,21 @@ class ToAst(Transformer):
     def assign_s(self, meta, ch):
         return self._n("Assign", meta, target=ch[0], value=ch[1])
 
+    def assign_multi(self, meta, ch):
+        return self._n("AssignMulti", meta, targets=list(ch[:-1]), value=ch[-1])
+
+    def let_multi(self, meta, ch):
+        return self._n("LetMulti", meta, names=ch[0], value=ch[1], mutable=False)
+
+    def var_multi(self, meta, ch):
+        return self._n("LetMulti", meta, names=ch[0], value=ch[1], mutable=True)
+
+    def names(self, meta, ch):
+        return [str(c) for c in ch]
+
+    def bare_tuple(self, meta, ch):
+        return self._n("Tuple", meta, items=list(ch))
+
     def aug_s(self, meta, ch):
         return self._n("AugAssign", meta, target=ch[0], op=str(ch[1]), value=ch[2])
 
@@ -169,6 +188,9 @@ class ToAst(Transformer):
 
     def block(self, meta, ch):
         return list(ch)
+
+    def inline_block(self, meta, ch):
+        return InlineBlock(ch)
 
     def if_s(self, meta, ch):
         branches = [(ch[0], ch[1])]
@@ -229,10 +251,16 @@ class ToAst(Transformer):
         return self._n("SSkip", meta, expr=ch[0])
 
     def st_call(self, meta, ch):
-        name, cargs, q, _co, default = ch
+        name, cargs, desc, q, _co, default = ch
         args = cargs if cargs is not None else []
         return self._n("SCall", meta, name=str(name), args=args, has_parens=cargs is not None,
-                       qmark=q is not None, default=default)
+                       desc=desc is not None, qmark=q is not None, default=default)
+
+    def st_max_by(self, meta, ch):
+        return self._n("SMaxBy", meta, expr=ch[0])
+
+    def st_min_by(self, meta, ch):
+        return self._n("SMinBy", meta, expr=ch[0])
 
     def call_args(self, meta, ch):
         return ch[0] if ch[0] is not None else []
@@ -330,7 +358,7 @@ class ToAst(Transformer):
         return self._n("List", meta, items=[c for c in ch if c is not None])
 
     def listcomp(self, meta, ch):
-        return self._n("ListComp", meta)
+        return self._n("ListComp", meta, expr=ch[0], targets=ch[1], iter=ch[2], cond=ch[3])
 
     def dict(self, meta, ch):
         return self._n("Dict", meta, pairs=[c for c in ch if c is not None])
@@ -397,11 +425,14 @@ def parse_string(raw, line, col, filename):
             i += 2
         elif c == "{":
             j = body.index("}", i)
-            src = body[i + 1:j]
+            src, spec = _split_format(body[i + 1:j])
             if buf:
                 parts.append("".join(buf))
                 buf = []
-            parts.append(parse_expr(src, line, col + 1 + i + 1, filename))
+            e = parse_expr(src, line, col + 1 + i + 1, filename)
+            if spec is not None:
+                e = Node("Format", e.line, e.col, expr=e, spec=spec)
+            parts.append(e)
             i = j + 1
         else:
             buf.append(c)
@@ -409,6 +440,24 @@ def parse_string(raw, line, col, filename):
     if buf or not parts:
         parts.append("".join(buf))
     return Node("Str", line, col, parts=parts)
+
+
+def _split_format(src):
+    """'x:.2f' -> ('x', '.2f'); a ':' inside brackets or quotes does not count."""
+    depth, quote = 0, None
+    for i, c in enumerate(src):
+        if quote:
+            if c == quote:
+                quote = None
+        elif c in "\"'":
+            quote = c
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == ":" and depth == 0:
+            return src[:i], src[i + 1:]
+    return src, None
 
 
 def _shift(node, dline, dcol):

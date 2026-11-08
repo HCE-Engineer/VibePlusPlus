@@ -10,40 +10,39 @@ import keyword
 from collections import OrderedDict
 
 from .errors import Diag
+from .types import contains_unknown
 from .types import (ANY, BOOL, FLOAT, INT, NEVER, NONE, PRIMS, STR, UNKNOWN, Dict, Err, List, Opt,
                     Prim, Rec, Tuple, assignable, contains_any, is_dyn, is_num, strip_err, strip_opt,
                     unify)
+
+MAX_NEST = 3  # rule N1 (v0.1)
 
 EFFECTS = ("fs", "net", "io", "time", "rand")
 
 PY_RESERVED = set(keyword.kwlist) | set(keyword.softkwlist) | {"_rt"}
 
-BUILTIN_HELP = ("builtins: read_text write_text print now random lines split strip join to_int to_float "
-                "parse_csv abs round str int float len sum min max unique flatten sort first take skip fail")
+BUILTIN_HELP = ("builtins: see the spec's builtin list (len sum min max avg range enumerate zip keys values items get "
+                "append pop split join strip replace upper lower starts_with find ...)")
 
 NAME_HINTS = {
-    "range": "Akış v0 has no range; count with a var: var i = 0 / while i < n: ... / i = i + 1",
-    "enumerate": "Akış v0 has no enumerate; count with a var: var i = 0 / while i < n: ... xs[i]",
-    "zip": "Akış v0 has no zip; walk an index with var i = 0 / while i < n: ... xs[i], ys[i]",
-    "sorted": "use xs | sort or xs | sort_by K",
-    "reversed": "Akış v0 has no reversed; use sort_by K desc or build the list in a loop",
-    "reverse": "Akış v0 has no reverse; use sort_by K desc or build the list in a loop",
-    "append": "use xs = xs + [x] on a var",
     "filter": "use the pipeline stage: xs | where P",
     "map": "use the pipeline stage: xs | map E",
-    "set": "use xs | unique",
-    "list": "use a list literal [..] or a pipeline",
-    "dict": "use a dict literal {k: v}",
-    "keys": "a pipeline over a dict yields (key, value) tuples: d | map .0",
-    "values": "a pipeline over a dict yields (key, value) tuples: d | map .1",
-    "items": "a pipeline over a dict yields (key, value) tuples: d | map it",
+    "set": "use xs | unique, or a dict {T: bool} for membership",
     "isinstance": "Akış is statically typed; isinstance does not exist",
-    "count": "use xs | where P | len, or xs | count_by K",
-    "any": "use (xs | where P | len) > 0",
-    "all": "use (xs | where not P | len) == 0",
-    "get": "use d[k] after checking k in d",
     "true": "write true / false",
+    "string": "use str(x)",
+    "length": "use len(x)",
+    "size": "use len(x)",
+    "push": "use append(xs, x) or xs.append(x) on a var",
+    "contains": "use x in xs",
+    "trim": "use strip(s)",
+    "max_by": "max_by is a pipeline stage: xs | max_by K",
+    "min_by": "min_by is a pipeline stage: xs | min_by K",
+    "sort_by": "sort_by is a pipeline stage: xs | sort_by K",
 }
+
+# Pure builtins whose result must not be thrown away (E-TYPE-12).
+MUTATING = {"append", "pop"}
 
 
 class Binding:
@@ -81,18 +80,47 @@ BUILTINS = {
     "lines": _B(["s"], [STR], List(STR)),
     "split": _B(["s", "sep"], [STR, STR], List(STR)),
     "strip": _B(["s"], [STR], STR),
-    "join": _B(["xs", "sep"], [List(STR), STR], STR),
+    "lstrip": _B(["s"], [STR], STR),
+    "rstrip": _B(["s"], [STR], STR),
+    "upper": _B(["s"], [STR], STR),
+    "lower": _B(["s"], [STR], STR),
+    "replace": _B(["s", "old", "new"], [STR, STR, STR], STR),
+    "starts_with": _B(["s", "prefix"], [STR, STR], BOOL),
+    "ends_with": _B(["s", "suffix"], [STR, STR], BOOL),
+    "chars": _B(["s"], [STR], List(STR)),
+    "is_digit": _B(["s"], [STR], BOOL),
+    "is_alpha": _B(["s"], [STR], BOOL),
+    "is_space": _B(["s"], [STR], BOOL),
+    "ord": _B(["c"], [STR], INT),
+    "chr": _B(["n"], [INT], STR),
+    "sqrt": _B(["x"], [FLOAT], FLOAT),
+    "floor": _B(["x"], [FLOAT], INT),
+    "ceil": _B(["x"], [FLOAT], INT),
+    "log": _B(["x"], [FLOAT], FLOAT),
+    "exp": _B(["x"], [FLOAT], FLOAT),
     "to_int": _B(["s"], [STR], Err(INT)),
     "to_float": _B(["s"], [STR], Err(FLOAT)),
     "parse_csv": _B(["text"], [STR], List(Dict(STR, STR))),
     "fail": _B(["msg"], [STR], NEVER),
 }
+for _b in BUILTINS.values():
+    _b["req"] = len(_b["params"])
+BUILTINS["split"]["req"] = 1  # split(s) splits on whitespace
+
+# Accepted alternative spellings (not in the spec; they only prevent pointless errors).
+ALIASES = {"startswith": "starts_with", "endswith": "ends_with", "isdigit": "is_digit", "isalpha": "is_alpha",
+           "isspace": "is_space", "sorted": "sort", "reversed": "reverse", "to_dict": "dict", "mean": "avg",
+           "length": "len"}
 # Generic builtins: param names; typing is special-cased in Checker._generic.
 GENERIC = {
     "abs": ["x"], "round": ["x", "n"], "str": ["x"], "int": ["x"], "float": ["x"], "len": ["x"],
-    "sum": ["xs"], "min": None, "max": None, "unique": ["xs"], "sort": ["xs"], "flatten": ["xs"],
-    "first": ["xs"], "take": ["xs", "n"], "skip": ["xs", "n"],
+    "sum": ["xs"], "min": None, "max": None, "unique": ["xs"], "sort": ["xs", "desc"], "flatten": ["xs"],
+    "first": ["xs"], "last": ["xs"], "take": ["xs", "n"], "skip": ["xs", "n"], "print": None, "range": None,
+    "enumerate": ["xs"], "zip": ["a", "b"], "keys": ["d"], "values": ["d"], "items": ["d"], "get": ["d", "k", "default"],
+    "reverse": ["xs"], "any": ["xs"], "all": ["xs"], "find": ["xs", "x"], "count": ["xs", "x"], "append": ["xs", "x"],
+    "pop": ["xs"], "avg": ["xs"], "dict": ["pairs"], "list": ["xs"], "join": ["xs", "sep"],
 }
+GENERIC_REQ = {"round": 1, "sort": 1, "get": 2}
 
 
 class Checker:
@@ -106,6 +134,7 @@ class Checker:
         self.it_stack = []
         self.reported_effects = set()
         self.name_counts = {}
+        self.loop_depth = 0
 
     # ---- diagnostics
     def err(self, code, node, msg, fix):
@@ -294,8 +323,12 @@ class Checker:
             self.check_stmt(s, depth, tail and i == len(stmts) - 1)
 
     def nest(self, s, depth):
-        if depth + 1 > 2:
-            self.err("E-NEST-01", s, f"block nesting depth {depth + 1} exceeds the limit of 2",
+        bodies = ([b for _, b in s.branches] + ([s.else_body] if s.else_body is not None else [])
+                  if s.kind == "If" else [s.body])
+        if all(type(b).__name__ == "InlineBlock" for b in bodies):
+            return  # same-line one-statement bodies add no indentation level
+        if depth + 1 > MAX_NEST:
+            self.err("E-NEST-01", s, f"block nesting depth {depth + 1} exceeds the limit of {MAX_NEST}",
                      "move the inner logic into a separate fn, or flatten with a pipeline or early return")
 
     def check_stmt(self, s, depth, tail):
@@ -307,19 +340,25 @@ class Checker:
                 dt = self.resolve(s.type)
                 self.expect(t, dt, s.value, f"'{s.name}' is declared as {dt}")
             else:
-                dt = t
-                if dt == NONE:
-                    dt = Opt(UNKNOWN)
-                elif dt == NEVER:
-                    dt = UNKNOWN
+                dt = self.binding_type(t)
             b = self.define(s.name, dt, s.mutable)
             s.pyname = b.pyname
+        elif k == "LetMulti":
+            t = self.val(s.value)
+            parts = self.unpack(t, len(s.names), s.value)
+            s.pynames = [self.define(n, self.binding_type(pt), s.mutable).pyname for n, pt in zip(s.names, parts)]
         elif k == "Assign":
-            self.check_assign(s)
+            self.check_assign(s.target, self.raw(s.value), s.value)
+        elif k == "AssignMulti":
+            t = self.val(s.value)
+            parts = self.unpack(t, len(s.targets), s.value)
+            for tgt, pt in zip(s.targets, parts):
+                self.check_assign(tgt, pt, s.value)
         elif k == "AugAssign":
-            self.err("E-SYNTAX-04", s, f"compound assignment '{s.op}' is not in Akış v0",
-                     f"write x = x {s.op[:-1]} value")
-            self.raw(s.value)
+            op = s.op[:-1]
+            bin_node = type(s)("Bin", s.line, s.col, op=op, left=s.target, right=s.value)
+            t = self.raw(bin_node)
+            self.check_assign(s.target, t, s.value)
         elif k == "Return":
             if s.value is None:
                 if ret != NONE and not isinstance(ret, Opt) and strip_err(ret) != NONE:
@@ -328,9 +367,9 @@ class Checker:
                 t = self.raw(s.value)
                 self.expect(t, ret, s.value, f"fn '{self.fn.name}' returns {ret}")
         elif k in ("Break", "Continue"):
-            w = "break" if k == "Break" else "continue"
-            self.err("E-SYNTAX-04", s, f"'{w}' is not in Akış v0",
-                     "use a while loop whose condition stops it, or return early from the fn")
+            if self.loop_depth == 0:
+                w = "break" if k == "Break" else "continue"
+                self.err("E-SYNTAX-04", s, f"'{w}' outside a loop", "use it inside for or while")
         elif k == "ExprStmt":
             t = self.raw(s.expr)
             if tail and ret != NONE:
@@ -341,6 +380,8 @@ class Checker:
                 if isinstance(t, Err):
                     self.err("E-TYPE-05", s.expr, f"result of type {t} is discarded without handling the error",
                              "propagate with ? (fn must return T!) or handle with ??")
+                else:
+                    self.check_discard(s.expr, t)
         elif k == "If":
             self.nest(s, depth)
             for cond, body in s.branches:
@@ -357,54 +398,112 @@ class Checker:
             it = self.val(s.iter)
             et = self.iter_elem(it, s.iter)
             self.push()
-            if len(s.targets) > 1:
-                self.err("E-SYNTAX-04", s, "tuple unpacking in 'for' is not in Akış v0",
-                         f"write 'for p in ...:' and use p.0, p.1")
-                s.pynames = [self.define(n, UNKNOWN, False).pyname for n in s.targets]
-            else:
-                s.pynames = [self.define(s.targets[0], et, False).pyname]
+            parts = [et] if len(s.targets) == 1 else self.unpack(et, len(s.targets), s.iter)
+            s.pynames = [self.define(n, pt, False).pyname for n, pt in zip(s.targets, parts)]
+            self.loop_depth += 1
             self.check_block(s.body, depth + 1, False)
+            self.loop_depth -= 1
             self.pop()
         elif k == "While":
             self.nest(s, depth)
             self.val(s.cond)
             self.push()
+            self.loop_depth += 1
             self.check_block(s.body, depth + 1, False)
+            self.loop_depth -= 1
             self.pop()
         else:
             raise AssertionError(k)
 
-    def check_assign(self, s):
-        tgt = s.target
-        vt = self.raw(s.value)
+    def binding_type(self, t):
+        if t == NONE:
+            return Opt(UNKNOWN)
+        if t == NEVER:
+            return UNKNOWN
+        return t
+
+    def unpack(self, t, n, node):
+        """Types of the n parts when destructuring a value of type t."""
+        t = strip_opt(t)
+        if isinstance(t, Tuple):
+            if len(t.items) == n:
+                return list(t.items)
+            self.err("E-TYPE-01", node, f"cannot unpack {t} into {n} names", f"use exactly {len(t.items)} names")
+            return [UNKNOWN] * n
+        if isinstance(t, List):
+            return [t.elem] * n
+        if is_dyn(t):
+            return [UNKNOWN] * n
+        self.err("E-TYPE-01", node, f"cannot unpack {t} into {n} names", "unpack a tuple: let a, b = (x, y)")
+        return [UNKNOWN] * n
+
+    def check_discard(self, expr, t):
+        """E-TYPE-12: a computed value is thrown away (e.g. `sort(xs)` or `x == 1` as a statement)."""
+        if t in (NONE, NEVER, UNKNOWN, ANY) or (isinstance(t, Err) and strip_err(t) == NONE):
+            return
+        e = expr
+        while e.kind == "Try":
+            return
+        kind = e.kind
+        if kind in ("Call", "MethodCall"):
+            tgt = getattr(e, "target", None)
+            if not tgt or tgt[0] != "builtin" or tgt[1] in MUTATING:
+                return
+            if BUILTINS.get(tgt[1], {}).get("effects"):
+                return
+        elif kind == "Pipe":
+            last = e.stages[-1]
+            tgt = getattr(last, "target", None)
+            if last.kind == "SCall" and (not tgt or tgt[0] != "builtin" or tgt[1] in MUTATING):
+                return
+        elif kind not in ("Compare", "Bin", "Var", "Int", "Float", "Str", "Bool", "Field", "Index", "TIndex",
+                          "BoolOp", "Not", "Tuple", "List", "Dict"):
+            return
+        fix = "use the value (assign it with let/var) or remove the line"
+        if kind == "Compare" and len(expr.rest) == 1 and expr.rest[0][0] == "==":
+            fix = "to assign use a single '=': x = value"
+        elif kind in ("Call", "MethodCall", "Pipe"):
+            fix = "builtins do not modify their argument; assign the result, e.g. xs = xs | sort"
+        self.err("E-TYPE-12", expr, f"value of type {t} is computed but not used", fix)
+
+    def check_assign(self, tgt, vt, vnode):
         if tgt.kind == "Var":
             b = self.lookup(tgt.name)
             if b is None:
                 self.err("E-TYPE-02", tgt, f"assignment to undeclared name '{tgt.name}'",
                          f"declare it first: var {tgt.name} = ...")
+                tgt.pyname = tgt.name
                 return
             tgt.pyname = b.pyname
             if not b.mutable:
                 self.err("E-TYPE-07", tgt, f"cannot assign to '{tgt.name}' (declared with let or a parameter)",
                          f"declare it with var {tgt.name} = ...")
-            self.expect(vt, b.type, s.value, f"'{tgt.name}' has type {b.type}")
+            self.expect(vt, b.type, vnode, f"'{tgt.name}' has type {b.type}")
+            if b.mutable and contains_unknown(b.type) and not isinstance(vt, Err) and assignable(vt, b.type) \
+                    and not contains_unknown(vt) and vt not in (NONE, NEVER):
+                # refine e.g. `var out = []` after the first assignment
+                b.type = Opt(strip_opt(vt)) if isinstance(b.type, Opt) else vt
             return
         if tgt.kind in ("Index", "Field"):
-            root = tgt.obj
-            while root.kind in ("Index", "Field", "TIndex"):
-                root = root.obj
-            if root.kind == "Var":
-                b = self.lookup(root.name)
-                if b is not None and not b.mutable:
-                    self.err("E-TYPE-07", tgt, f"cannot modify '{root.name}' (declared with let or a parameter)",
-                             f"copy it into a var first: var {root.name}2 = {root.name}")
-            elif root.kind == "It":
-                self.err("E-TYPE-07", tgt, "cannot modify 'it'", "build a new value with map")
+            self.check_mutable_root(tgt)
             tt = self.val(tgt)
-            self.expect(vt, tt, s.value, "target has type " + str(tt))
+            self.expect(vt, tt, vnode, "target has type " + str(tt))
+            tgt.is_target = True
             return
         self.err("E-SYNTAX-04", tgt, "invalid assignment target", "assign to a var name, xs[i] or d[k]")
         self.raw(tgt)
+
+    def check_mutable_root(self, node):
+        root = node
+        while root.kind in ("Index", "Field", "TIndex"):
+            root = root.obj
+        if root.kind == "Var":
+            b = self.lookup(root.name)
+            if b is not None and not b.mutable:
+                self.err("E-TYPE-07", node, f"cannot modify '{root.name}' (declared with let or a parameter)",
+                         f"copy it into a var first: var {root.name}2 = {root.name}")
+        elif root.kind == "It":
+            self.err("E-TYPE-07", node, "cannot modify 'it'", "build a new value with map")
 
     def expect(self, src, dst, node, ctx):
         if isinstance(src, Err) and not isinstance(dst, Err):
@@ -516,23 +615,45 @@ class Checker:
         return self.check_call(n, n.name, n.args, None, None)
 
     def e_MethodCall(self, n):
-        self.raw(n.obj)
-        for _, a in n.args:
-            self.raw(a)
-        fix = (f"call it as a function: {n.name}(x, ...) or x | {n.name}(...)"
-               if n.name in BUILTINS or n.name in GENERIC or n.name in self.fns
-               else f"there are no methods; {BUILTIN_HELP}")
-        self.err("E-SYNTAX-04", n, f"method call '.{n.name}(...)' is not in Akış v0", fix)
-        return UNKNOWN
+        # Uniform call syntax: x.f(a, b) == f(x, a, b) == x | f(a, b)
+        ot = self.val(n.obj)
+        return self.check_call(n, n.name, n.args, ot, n.obj)
 
     def e_Slice(self, n):
-        self.raw(n.obj)
-        self.err("E-SYNTAX-04", n, "slicing xs[a:b] is not in Akış v0", "use xs | skip a | take n")
-        return self.val(n.obj)
+        ot = strip_opt(self.val(n.obj))
+        for b in (n.lo, n.hi):
+            if b is not None:
+                bt = self.val(b)
+                if not assignable(bt, INT):
+                    self.err("E-TYPE-01", b, f"slice bound must be int, got {bt}", "use an int")
+        if isinstance(ot, List) or ot == STR or is_dyn(ot):
+            return ot
+        if isinstance(ot, Tuple):
+            return List(UNKNOWN)
+        self.err("E-TYPE-01", n, f"type {ot} cannot be sliced", "slice a list or str")
+        return UNKNOWN
 
     def e_ListComp(self, n):
-        self.err("E-SYNTAX-04", n, "list comprehensions are not in Akış v0", "use xs | where P | map E")
-        return UNKNOWN
+        it = self.val(n.iter)
+        et = self.iter_elem(it, n.iter)
+        self.push()
+        parts = [et] if len(n.targets) == 1 else self.unpack(et, len(n.targets), n.iter)
+        n.pynames = [self.define(nm, pt, False).pyname for nm, pt in zip(n.targets, parts)]
+        if n.cond is not None:
+            self.val(n.cond)
+        t = self.val(n.expr)
+        self.pop()
+        return List(t)
+
+    def e_Format(self, n):
+        t = strip_opt(self.val(n.expr))
+        sample = {INT: 0, FLOAT: 0.0, STR: "", BOOL: True}.get(t)
+        if sample is not None:
+            try:
+                format(sample, n.spec)
+            except (ValueError, TypeError):
+                self.err("E-TYPE-01", n, f"invalid format spec ':{n.spec}' for {t}", "e.g. {x:.2f} {n:5d} {s:>10}")
+        return STR
 
     def e_Tuple(self, n):
         return Tuple(tuple(self.val(x) for x in n.items))
@@ -736,9 +857,14 @@ class Checker:
     def stage(self, st, cur):
         k = st.kind
         names = {"SWhere": "where", "SMap": "map", "SSortBy": "sort_by", "SCountBy": "count_by",
-                 "SGroupBy": "group_by", "STake": "take", "SSkip": "skip"}
+                 "SGroupBy": "group_by", "STake": "take", "SSkip": "skip", "SMaxBy": "max_by", "SMinBy": "min_by"}
         if k == "SCall":
-            t = self.check_call(st, st.name, st.args, cur, st)
+            if st.desc:
+                if ALIASES.get(st.name, st.name) != "sort" or st.name in self.fns:
+                    self.err("E-SYNTAX-04", st, f"'desc' only follows sort or sort_by K", "write | sort desc or | sort_by K desc")
+                else:
+                    st.args = list(st.args) + [("desc", type(st)("Bool", st.line, st.col, value=True))]
+            t = self.check_call(st, st.name, st.args, cur, None)
             if st.qmark:
                 if not isinstance(self.fn.ret, Err):
                     self.err("E-QMARK-01", st, f"'?' used in fn '{self.fn.name}' whose return type {self.fn.ret} is not T!",
@@ -756,6 +882,9 @@ class Checker:
         if k == "SSortBy":
             self.with_it_val(elem, st.expr)
             return List(elem)
+        if k in ("SMaxBy", "SMinBy"):
+            self.with_it_val(elem, st.expr)
+            return elem
         if k == "SCountBy":
             kt = self.with_it_val(elem, st.expr)
             return List(Tuple((kt, INT)))
@@ -786,6 +915,8 @@ class Checker:
     def check_call(self, node, name, args, pre, pre_node):
         """Type a call `name(args)`; `pre` is the implicit first argument type in a pipeline stage."""
         in_pipe = pre is not None
+        if name not in self.fns and name not in self.records and name in ALIASES:
+            name = ALIASES[name]
         b = self.lookup(name)
         if b is not None:
             self.err("E-TYPE-02", node, f"'{name}' is a variable, not a function", "functions cannot be stored in variables")
@@ -812,7 +943,7 @@ class Checker:
         if name in BUILTINS:
             spec = BUILTINS[name]
             node.target = ("builtin", name)
-            argts = self.bind_args(node, name, spec["params"], args, pre)
+            argts = self.bind_args(node, name, spec["params"], args, pre, n2=False, req=spec["req"])
             for pn, pt, at_node in zip(spec["params"], spec["ptypes"], argts):
                 if at_node is None:
                     continue
@@ -825,6 +956,10 @@ class Checker:
             return spec["ret"]
         if name in GENERIC:
             node.target = ("builtin", name)
+            if name in MUTATING:
+                first = pre_node if pre_node is not None else (args[0][1] if args and args[0][0] is None else None)
+                if first is not None and first.kind in ("Var", "Index", "Field", "TIndex", "It"):
+                    self.check_mutable_root(first)
             return self.generic(node, name, args, pre)
         node.target = ("unknown", name)
         for _, a in args:
@@ -835,7 +970,7 @@ class Checker:
         self.err("E-TYPE-02", node, f"unknown function '{name}'", hint)
         return UNKNOWN
 
-    def bind_args(self, node, name, pnames, args, pre, named_ok=True, n2=True):
+    def bind_args(self, node, name, pnames, args, pre, named_ok=True, n2=True, req=None):
         """Map (pre +) args to params. Returns list aligned with pnames of (type, node) or None."""
         total = len(args) + (1 if pre is not None else 0)
         if n2 and total >= 3 and any(k is None for k, _ in args):
@@ -880,7 +1015,8 @@ class Checker:
                     self.err("E-TYPE-04", a, f"argument '{k}' given twice in call to '{name}'", "pass it once")
                     continue
                 out[i] = (t, a)
-        missing = [p for p, o in zip(pnames, out) if o is None]
+        req = len(pnames) if req is None else req
+        missing = [p for p, o in list(zip(pnames, out))[:req] if o is None]
         if missing:
             self.err("E-TYPE-04", node, f"call to '{name}' is missing argument(s): {', '.join(missing)}",
                      f"'{name}' parameters: " + ", ".join(pnames))
@@ -929,8 +1065,22 @@ class Checker:
                     self.err("E-TYPE-01", node, f"'{name}' of {t} is not supported", "compare numbers or strings")
                 r = unify(r, t)
             return r
+        if name in ("print", "range"):
+            for k, a in args:
+                if k is not None:
+                    self.err("E-TYPE-04", a, f"'{name}' takes no named arguments", f"pass arguments positionally")
+            ts = ([pre] if pre is not None else []) + [self.val(a) for k, a in args]
+            if name == "print":
+                self.need_effects(node, "print", {"io"})
+                return NONE
+            if not 1 <= len(ts) <= 3:
+                self.err("E-TYPE-04", node, f"range takes 1 to 3 arguments, got {len(ts)}", "range(n), range(a, b), range(a, b, step)")
+            for t in ts:
+                if not assignable(t, INT):
+                    self.err("E-TYPE-01", node, f"range needs int arguments, got {t}", "use ints")
+            return List(INT)
         pnames = GENERIC[name]
-        argts = self.bind_args(node, name, pnames, args, pre)
+        argts = self.bind_args(node, name, pnames, args, pre, n2=False, req=GENERIC_REQ.get(name, len(pnames)))
         ts = [a[0] if a is not None else UNKNOWN for a in argts]
         for t, a in zip(ts, argts):
             if a is not None and isinstance(t, Err):
@@ -971,6 +1121,8 @@ class Checker:
             return INT if e == INT else (FLOAT if e == FLOAT else UNKNOWN)
         if name in ("unique", "sort"):
             e = self.list_elem(ts[0], node, name)
+            if t0 == STR:
+                return List(STR)
             return List(e)
         if name == "flatten":
             e = self.list_elem(ts[0], node, name)
@@ -987,6 +1139,75 @@ class Checker:
             if len(ts) > 1 and not assignable(ts[1], INT):
                 self.err("E-TYPE-01", node, f"'{name}' needs an int count, got {ts[1]}", "use an int")
             return List(e)
+        if name == "last":
+            return Opt(self.list_elem(ts[0], node, name))
+        if name == "reverse":
+            if t0 == STR:
+                return STR
+            return List(self.list_elem(ts[0], node, name))
+        if name == "enumerate":
+            return List(Tuple((INT, self.list_elem(ts[0], node, name))))
+        if name == "zip":
+            return List(Tuple((self.list_elem(ts[0], node, name), self.list_elem(ts[1], node, name))))
+        if name in ("keys", "values", "items"):
+            if isinstance(t0, Dict):
+                return List({"keys": t0.key, "values": t0.val, "items": Tuple((t0.key, t0.val))}[name])
+            if not is_dyn(t0):
+                self.err("E-TYPE-01", node, f"'{name}' needs a dict, got {t0}", "pass a dict")
+            return List(UNKNOWN)
+        if name == "get":
+            if isinstance(t0, Dict):
+                if argts[1] is not None and not assignable(ts[1], t0.key):
+                    self.err("E-TYPE-01", node, f"dict key must be {t0.key}, got {ts[1]}", f"use a {t0.key} key")
+                if argts[2] is None:
+                    return Opt(t0.val)
+                return unify(t0.val, ts[2])
+            if isinstance(t0, List):
+                if argts[1] is not None and not assignable(ts[1], INT):
+                    self.err("E-TYPE-01", node, f"list index must be int, got {ts[1]}", "use an int")
+                return Opt(t0.elem) if argts[2] is None else unify(t0.elem, ts[2])
+            if not is_dyn(t0):
+                self.err("E-TYPE-01", node, f"'get' needs a dict or list, got {t0}", "pass a dict")
+            return UNKNOWN
+        if name in ("any", "all"):
+            self.list_elem(ts[0], node, name)
+            return BOOL
+        if name in ("find", "count"):
+            if t0 == STR:
+                if not assignable(ts[1], STR):
+                    self.err("E-TYPE-01", node, f"'{name}' in a str needs a str, got {ts[1]}", "use a str")
+            else:
+                self.list_elem(ts[0], node, name)
+            return INT
+        if name == "append":
+            e = self.list_elem(ts[0], node, name)
+            if not assignable(ts[1], e):
+                self.err("E-TYPE-01", node, f"cannot append {ts[1]} to a list of {e}", f"append a {e}")
+            return NONE
+        if name == "pop":
+            return self.list_elem(ts[0], node, name)
+        if name == "avg":
+            e = self.list_elem(ts[0], node, name)
+            if not is_num(e):
+                self.err("E-TYPE-01", node, f"avg needs numbers, got [{e}]", "map to numbers first")
+            return FLOAT
+        if name == "dict":
+            e = strip_opt(self.list_elem(ts[0], node, name))
+            if isinstance(e, Tuple) and len(e.items) == 2:
+                return Dict(e.items[0], e.items[1])
+            if not is_dyn(e):
+                self.err("E-TYPE-01", node, f"dict needs a list of (key, value) pairs, got [{e}]", "pass [(k, v)]")
+            return Dict(UNKNOWN, UNKNOWN)
+        if name == "list":
+            return List(self.list_elem(ts[0], node, name))
+        if name == "join":
+            a, b = t0, strip_opt(ts[1]) if len(ts) > 1 else UNKNOWN
+            if a == STR and isinstance(b, List):  # sep.join(xs) habit: accept both orders
+                node.join_swap = True
+                a, b = b, a
+            if not (isinstance(a, List) and assignable(a.elem, STR) or is_dyn(a)):
+                self.err("E-TYPE-01", node, f"join needs a list of str, got {a}", "map to str first: xs | map str(it) | join(\", \")")
+            return STR
         raise AssertionError(name)
 
     def list_elem(self, t, node, name):

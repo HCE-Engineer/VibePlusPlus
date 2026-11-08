@@ -5,9 +5,11 @@ because errors are exceptions. `??` (coalesce) catches AksError and None.
 """
 from __future__ import annotations
 
+import builtins as _bi
 import csv as _csv
 import importlib as _importlib
 import io as _io
+import math as _math
 import random as _random
 import time as _time
 
@@ -117,8 +119,124 @@ def flatten(xss):
     return [x for xs in _seq(xss) for x in xs]
 
 
-def sort(xs):
-    return sorted(_seq(xs))
+def sort(xs, desc=False):
+    return sorted(_seq(xs), reverse=desc)
+
+
+def max_by(xs, key):
+    s = _seq(xs)
+    if not s:
+        raise AksError("max_by of empty list")
+    return max(s, key=key)  # first maximal element
+
+
+def min_by(xs, key):
+    s = _seq(xs)
+    if not s:
+        raise AksError("min_by of empty list")
+    return min(s, key=key)
+
+
+def last(xs):
+    s = _seq(xs)
+    return s[-1] if s else None
+
+
+def reverse(xs):
+    if isinstance(xs, str):
+        return xs[::-1]
+    return _seq(xs)[::-1]
+
+
+def enumerate_(xs):
+    return list(_bi.enumerate(_seq(xs)))
+
+
+def zip_(a, b):
+    return list(_bi.zip(_seq(a), _seq(b)))
+
+
+def keys(d):
+    return list(d.keys())
+
+
+def values(d):
+    return list(d.values())
+
+
+def items(d):
+    return list(d.items())
+
+
+def get(d, k, default=None):
+    if isinstance(d, dict):
+        return d.get(k, default)
+    try:
+        return d[k]
+    except IndexError:
+        return default
+
+
+def any_(xs):
+    return _bi.any(_seq(xs))
+
+
+def all_(xs):
+    return _bi.all(_seq(xs))
+
+
+def find(xs, x):
+    if isinstance(xs, str):
+        return xs.find(x)
+    s = _seq(xs)
+    return s.index(x) if x in s else -1
+
+
+def count(xs, x):
+    if isinstance(xs, str):
+        return xs.count(x)
+    return _seq(xs).count(x)
+
+
+def append(xs, x):
+    xs.append(x)
+
+
+def pop(xs):
+    if not xs:
+        raise AksError("pop from empty list")
+    return xs.pop()
+
+
+def avg(xs):
+    s = _seq(xs)
+    if not s:
+        raise AksError("avg of empty list")
+    return sum(s) / len(s)
+
+
+def dict_(pairs):
+    return dict(_seq(pairs))
+
+
+def list_(xs):
+    return _seq(xs)
+
+
+def range_(*args):
+    return list(_bi.range(*args))
+
+
+def at(obj, i):
+    """xs[i] / d[k]: a missing index or key is an Akış error, so `xs[i] ?? d` works."""
+    try:
+        return obj[i]
+    except (IndexError, KeyError):
+        raise AksError(f"index {i!r} not found") from None
+
+
+def fmt(x, spec):
+    return format(x, spec)
 
 
 def first(xs):
@@ -144,8 +262,8 @@ def write_text(path, text):
     return None
 
 
-def print_(x):
-    print(x)
+def print_(*xs):
+    print(*xs)
 
 
 def now():
@@ -160,7 +278,7 @@ def lines(s):
     return s.splitlines()
 
 
-def split(s, sep):
+def split(s, sep=None):
     return s.split(sep)
 
 
@@ -168,7 +286,88 @@ def strip(s):
     return s.strip()
 
 
+def lstrip(s):
+    return s.lstrip()
+
+
+def rstrip(s):
+    return s.rstrip()
+
+
+def upper(s):
+    return s.upper()
+
+
+def lower(s):
+    return s.lower()
+
+
+def replace(s, old, new):
+    return s.replace(old, new)
+
+
+def starts_with(s, prefix):
+    return s.startswith(prefix)
+
+
+def ends_with(s, suffix):
+    return s.endswith(suffix)
+
+
+def chars(s):
+    return list(s)
+
+
+def is_digit(s):
+    return s.isdigit()
+
+
+def is_alpha(s):
+    return s.isalpha()
+
+
+def is_space(s):
+    return s.isspace()
+
+
+def ord_(c):
+    return ord(c)
+
+
+def chr_(n):
+    return chr(n)
+
+
+def _math_call(fn, x, name):
+    try:
+        return fn(x)
+    except (ValueError, OverflowError) as e:
+        raise AksError(f"{name}({x!r}): {e}") from None
+
+
+def sqrt(x):
+    return _math_call(_math.sqrt, x, "sqrt")
+
+
+def floor(x):
+    return _math.floor(x)
+
+
+def ceil(x):
+    return _math.ceil(x)
+
+
+def log(x):
+    return _math_call(_math.log, x, "log")
+
+
+def exp(x):
+    return _math_call(_math.exp, x, "exp")
+
+
 def join(xs, sep):
+    if isinstance(xs, str) and not isinstance(sep, str):  # sep.join(xs) habit
+        xs, sep = sep, xs
     return sep.join(xs)
 
 
@@ -203,11 +402,17 @@ def str_(x):
 
 
 def int_(x):
-    return int(x)
+    try:
+        return int(x)
+    except (ValueError, TypeError, OverflowError):
+        raise AksError(f"int: invalid value {x!r}") from None
 
 
 def float_(x):
-    return float(x)
+    try:
+        return float(x)
+    except (ValueError, TypeError):
+        raise AksError(f"float: invalid value {x!r}") from None
 
 
 # ---- python interop

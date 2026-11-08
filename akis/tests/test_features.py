@@ -207,3 +207,118 @@ fn copy_upper(src: str, dst: str) -> int! !fs
 def test_bool_literal_spellings_and_none():
     assert codes("fn f() -> bool\n  true and not False\n") == []
     assert codes("fn f() -> int?\n  none\n") == []
+
+
+def test_v01_loops_and_assignment():
+    m = build('''
+fn fib(n: int) -> int
+  var a, b = 0, 1
+  for _ in range(n):
+    a, b = b, a + b
+  a
+
+fn first_neg(xs: [int]) -> int
+  var found = -1
+  for i, x in enumerate(xs):
+    if x >= 0: continue
+    found = i
+    break
+  found
+
+fn total(xs: [int]) -> int
+  var t = 0
+  for x in xs: t += x
+  t
+
+fn pairs(a: [int], b: [str]) -> [str]
+  zip(a, b) | map "{it.1}{it.0}"
+''')
+    assert m.fib(10) == 55 and m.fib(0) == 0
+    assert m.first_neg([3, 0, -2, -5]) == 2 and m.first_neg([1]) == -1
+    assert m.total([1, 2, 3]) == 6
+    assert m.pairs([1, 2], ["a", "b"]) == ["a1", "b2"]
+
+
+def test_v01_ufcs_strings_and_format():
+    m = build('''
+fn norm(s: str) -> str
+  s.strip().lower().replace(" ", "_")
+
+fn words(s: str) -> [str]
+  s.split() | where it.starts_with("a") or it.endswith("z")
+
+fn money(x: float) -> str
+  "{x:.2f} TL"
+
+fn initials(s: str) -> str
+  s.split() | map upper(it[0]) | join("")
+
+fn rev(s: str) -> str
+  s[::1] if false else reverse(s)
+''' .replace("  s[::1] if false else reverse(s)", "  reverse(s)"))
+    assert m.norm("  Hello World ") == "hello_world"
+    assert m.words("apple buzz cat ant") == ["apple", "buzz", "ant"]
+    assert m.money(3.14159) == "3.14 TL"
+    assert m.initials("ada lovelace") == "AL"
+    assert m.rev("abc") == "cba"
+
+
+def test_v01_collections():
+    m = build('''
+fn stack_ok(s: str) -> bool
+  var st: [str] = []
+  let pairs = {")": "(", "]": "["}
+  for c in chars(s):
+    if c in "([":
+      st.append(c)
+    elif c in pairs:
+      if len(st) == 0 or st.pop() != pairs[c]: return false
+  len(st) == 0
+
+fn freq(ws: [str]) -> {str: int}
+  var d: {str: int} = {}
+  for w in ws:
+    d[w] = get(d, w, 0) + 1
+  d
+
+fn top(d: {str: int}) -> str
+  d | max_by .1 | first_of
+
+fn first_of(p: (str, int)) -> str
+  p.0
+
+fn safe_at(xs: [int], i: int) -> int
+  xs[i] ?? -1
+
+fn evens(xs: [int]) -> [int]
+  [x * x for x in xs if x % 2 == 0]
+
+fn mid(xs: [int]) -> [int]
+  xs[1:-1]
+''')
+    assert m.stack_ok("([])") and not m.stack_ok("(]") and not m.stack_ok("((")
+    assert m.freq(["a", "b", "a"]) == {"a": 2, "b": 1}
+    assert m.top({"x": 1, "y": 5, "z": 5}) == "y"
+    assert m.safe_at([1, 2], 5) == -1 and m.safe_at([1, 2], -1) == 2
+    assert m.evens([1, 2, 3, 4]) == [4, 16]
+    assert m.mid([1, 2, 3, 4]) == [2, 3]
+
+
+def test_v01_sort_desc_avg_misc():
+    m = build('''
+fn f(xs: [int]) -> [int]
+  xs | sort desc | take 2
+
+fn mean(xs: [float]) -> float
+  xs | avg ?? 0.0
+
+fn inv(d: {str: int}) -> {int: str}
+  d | map (.1, .0) | dict
+
+fn lenient() -> bool
+  True and "ab".startswith('a')
+''')
+    assert m.f([3, 9, 1, 7]) == [9, 7]
+    assert m.mean([]) == 0.0 and m.mean([1.0, 2.0]) == 1.5
+    assert m.inv({"a": 1}) == {1: "a"}
+    assert m.lenient() is True

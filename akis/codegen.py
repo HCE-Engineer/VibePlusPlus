@@ -6,7 +6,9 @@ from .types import NONE
 
 RT_NAMES = {
     "print": "print_", "min": "min_", "max": "max_", "sum": "sum_", "len": "len_", "abs": "abs_",
-    "round": "round_", "str": "str_", "int": "int_", "float": "float_",
+    "round": "round_", "str": "str_", "int": "int_", "float": "float_", "range": "range_", "list": "list_",
+    "dict": "dict_", "any": "any_", "all": "all_", "zip": "zip_", "enumerate": "enumerate_", "chr": "chr_",
+    "ord": "ord_",
 }
 
 BINPREC = {"**": 8, "*": 7, "/": 7, "//": 7, "%": 7, "+": 6, "-": 6}
@@ -60,8 +62,19 @@ class Gen:
         k = s.kind
         if k == "Let":
             self.line(d, f"{s.pyname} = {self.e(s.value)}")
+        elif k == "LetMulti":
+            self.line(d, f"{', '.join(s.pynames)} = {self.e(s.value)}")
         elif k == "Assign":
-            self.line(d, f"{self.e(s.target)} = {self.e(s.value)}")
+            self.line(d, f"{self.target(s.target)} = {self.e(s.value)}")
+        elif k == "AssignMulti":
+            self.line(d, f"{', '.join(self.target(t) for t in s.targets)} = {self.e(s.value)}")
+        elif k == "AugAssign":
+            t = self.target(s.target)
+            self.line(d, f"{t} = ({self.e(s.target)} {s.op[:-1]} {self.e(s.value)})")
+        elif k == "Break":
+            self.line(d, "break")
+        elif k == "Continue":
+            self.line(d, "continue")
         elif k == "Return":
             self.line(d, "return" if s.value is None else f"return {self.e(s.value)}")
         elif k == "ExprStmt":
@@ -77,13 +90,22 @@ class Gen:
                 self.line(d, "else:")
                 self.block(s.else_body, d + 1, tail)
         elif k == "For":
-            self.line(d, f"for {s.pynames[0]} in {self.e(s.iter)}:")
+            self.line(d, f"for {', '.join(s.pynames)} in {self.e(s.iter)}:")
             self.block(s.body, d + 1)
         elif k == "While":
             self.line(d, f"while {self.e(s.cond)}:")
             self.block(s.body, d + 1)
         else:
             raise AssertionError(f"cannot generate {k}")
+
+    def target(self, t):
+        if t.kind == "Var":
+            return t.pyname
+        if t.kind == "Index":
+            return f"{self.e(t.obj)}[{self.e(t.idx)}]"
+        if t.kind == "Field":
+            return f"{self.e(t.obj)}[{t.name!r}]"
+        raise AssertionError(t.kind)
 
     # ---- expressions (always fully parenthesised where precedence matters)
     def e(self, n):
@@ -149,7 +171,22 @@ class Gen:
         return f"{self.e(n.obj)}[{n.idx}]"
 
     def g_Index(self, n):
-        return f"{self.e(n.obj)}[{self.e(n.idx)}]"
+        return f"_rt.at({self.e(n.obj)}, {self.e(n.idx)})"
+
+    def g_Slice(self, n):
+        lo = "" if n.lo is None else self.e(n.lo)
+        hi = "" if n.hi is None else self.e(n.hi)
+        return f"{self.e(n.obj)}[{lo}:{hi}]"
+
+    def g_ListComp(self, n):
+        cond = "" if n.cond is None else f" if {self.e(n.cond)}"
+        return f"[{self.e(n.expr)} for {', '.join(n.pynames)} in {self.e(n.iter)}{cond}]"
+
+    def g_Format(self, n):
+        return f"_rt.fmt({self.e(n.expr)}, {n.spec!r})"
+
+    def g_MethodCall(self, n):
+        return f"{self.callee(n)}({self.call_args(n.args, pre=self.e(n.obj))})"
 
     def g_Try(self, n):
         return self.e(n.expr)  # errors are exceptions: propagation is automatic
@@ -206,6 +243,10 @@ class Gen:
             return f"_rt.take({cur}, {self.e(st.expr)})"
         if k == "SSkip":
             return f"_rt.skip({cur}, {self.e(st.expr)})"
+        if k == "SMaxBy":
+            return f"_rt.max_by({cur}, {lam})"
+        if k == "SMinBy":
+            return f"_rt.min_by({cur}, {lam})"
         raise AssertionError(k)
 
 

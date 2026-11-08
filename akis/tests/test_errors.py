@@ -56,13 +56,26 @@ def test_unhandled_error_value():
     assert codes("fn f(s: str) -> int\n  to_int(s) ?? 0\n") == []
 
 
+def test_inline_block_does_not_count_for_n1():
+    ok = ("fn f(xs: [int]) -> int\n  var t = 0\n  for x in xs:\n    if x > 0:\n"
+          "      while t < 9:\n        if x > 5: t += 1\n        t += 1\n  t\n")
+    assert codes(ok) == []
+
+
 def test_nesting_rule_n1():
     ok = "fn f(xs: [int]) -> int\n  var t = 0\n  for x in xs:\n    if x > 0:\n      t = t + x\n  t\n"
     assert codes(ok) == []
-    bad = ("fn f(xs: [int]) -> int\n  var t = 0\n  for x in xs:\n    if x > 0:\n"
+    ok3 = ("fn f(xs: [int]) -> int\n  var t = 0\n  for x in xs:\n    if x > 0:\n"
            "      while t < 3:\n        t = t + 1\n  t\n")
+    assert codes(ok3) == []
+    bad = ("fn f(xs: [int]) -> int\n  var t = 0\n  for x in xs:\n    if x > 0:\n"
+           "      while t < 3:\n        if t > 1:\n          t = t + 2\n        t = t + 1\n  t\n")
     d = one(bad)
-    assert (d.code, d.line, d.col) == ("E-NEST-01", 5, 7)
+    assert (d.code, d.line, d.col) == ("E-NEST-01", 6, 9)
+
+
+def test_builtins_exempt_from_n2():
+    assert codes('fn f(s: str) -> str\n  replace(s, "a", "b")\n') == []
 
 
 def test_named_args_rule_n2():
@@ -83,13 +96,26 @@ def test_records():
 
 
 def test_syntax_errors():
-    d = one("fn f(x: int) -> int:\n  x\n")
-    assert (d.code, d.line, d.col) == ("E-SYNTAX-01", 1, 20)
-    assert "no trailing ':'" in d.fix
     assert one("def f(x):\n  return x\n").code == "E-SYNTAX-01"
     assert one("fn f() -> int\n\t1\n").code == "E-SYNTAX-02"
-    assert one("fn f(xs: [int]) -> [int]\n  [x for x in xs]\n").code == "E-SYNTAX-04"
-    assert one("fn f(xs: [int]) -> int\n  var t = 0\n  for x in xs:\n    t += x\n  t\n").code == "E-SYNTAX-04"
+    d = one("fn f(x: int) -> int\n  x +\n")
+    assert (d.code, d.line) == ("E-SYNTAX-01", 2)
+    assert one("fn f(x: int) -> int\n  break\n").code == "E-SYNTAX-04"
+    assert "E-SYNTAX-04" in codes("fn f(xs: [int]) -> int?\n  xs | first desc\n")
+
+
+def test_unused_value():
+    assert codes("fn f(xs: [int]) -> [int]\n  var ys = xs\n  sort(ys)\n  ys\n") == ["E-TYPE-12"]
+    assert codes("fn f(xs: [int]) -> [int]\n  var ys = xs\n  ys.sort()\n  ys\n") == ["E-TYPE-12"]
+    d = one("fn f(x: int) -> int\n  var y = 0\n  y == x\n  y\n")
+    assert d.code == "E-TYPE-12" and "single '='" in d.fix
+    assert codes("fn f(xs: [int]) -> int\n  var ys = xs\n  pop(ys)\n  len(ys)\n") == []
+
+
+def test_mutation_needs_var():
+    assert codes("fn f(xs: [int]) -> [int]\n  xs.append(1)\n  xs\n") == ["E-TYPE-07"]
+    assert codes("fn f(xs: [int]) -> [int]\n  var ys = xs[:]\n  ys.append(1)\n  ys\n") == []
+    assert codes("fn f() -> int\n  let d = {\"a\": 1}\n  d[\"a\"] = 2\n  d[\"a\"]\n") == ["E-TYPE-07"]
 
 
 def test_type_errors():

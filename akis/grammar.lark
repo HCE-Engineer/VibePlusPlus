@@ -9,7 +9,7 @@ use_decl: "use" "py" dotted "as" NAME ":" "(" [type ("," type)*] ")" "->" type e
 dotted: NAME ("." NAME)*
 type_decl: "type" NAME "=" "{" field ("," field)* [","] "}" _NL
 field: NAME ":" type
-fn_decl: "fn" NAME "(" [param ("," param)* [","]] ")" ["->" type] effect* _NL _INDENT stmt+ _DEDENT
+fn_decl: "fn" NAME "(" [param ("," param)* [","]] ")" ["->" type] effect* [":"] _NL _INDENT stmt+ _DEDENT
 param: NAME ":" type
 effect: EFFECT
 
@@ -31,11 +31,18 @@ tatom: NAME                           -> tname
 
 ?simple: let_s | var_s | assign_s | aug_s | return_s | break_s | continue_s | expr_s
 
-let_s: "let" NAME [":" type] "=" expr
-var_s: "var" NAME [":" type] "=" expr
-assign_s: postfix "=" expr
+let_s: "let" NAME [":" type] "=" rhs
+     | "let" names "=" rhs                -> let_multi
+var_s: "var" NAME [":" type] "=" rhs
+     | "var" names "=" rhs                -> var_multi
+names: NAME ("," NAME)+
+     | "(" NAME ("," NAME)+ ")"
+assign_s: postfix "=" rhs
+        | postfix ("," postfix)+ "=" rhs  -> assign_multi
 aug_s: postfix AUGOP expr
-return_s: "return" [expr]
+return_s: "return" [rhs]
+?rhs: expr
+    | expr ("," expr)+                  -> bare_tuple
 break_s: "break"
 continue_s: "continue"
 expr_s: expr
@@ -49,6 +56,7 @@ for_target: NAME                        -> ft_name
           | "(" NAME ("," NAME)+ ")"    -> ft_multi
 while_s: "while" expr ":" block
 block: _NL _INDENT stmt+ _DEDENT
+     | simple _NL                         -> inline_block
 
 // ---- expressions -----------------------------------------------------------
 ?expr: head
@@ -65,7 +73,9 @@ ifx: "if" coalesce "then" ifbr "else" ifbr
       | "group_by" sexpr                  -> st_group_by
       | "take" sexpr                      -> st_take
       | "skip" sexpr                      -> st_skip
-      | NAME [call_args] [QMARK] [COALESCE sexpr] -> st_call
+      | "max_by" sexpr                    -> st_max_by
+      | "min_by" sexpr                    -> st_min_by
+      | NAME [call_args] [DESC] [QMARK] [COALESCE sexpr] -> st_call
 call_args: "(" [args] ")"
 ?sexpr: coalesce | ifx
 
@@ -116,7 +126,7 @@ call_args: "(" [args] ")"
         | "(" expr ")"
         | "(" expr "," [expr ("," expr)* [","]] ")" -> tuple
         | "[" [expr ("," expr)* [","]] "]"          -> list
-        | "[" expr "for" NAME "in" expr ["if" expr] "]" -> listcomp
+        | "[" expr "for" for_target "in" coalesce ["if" coalesce] "]" -> listcomp
         | "{" [kv ("," kv)* [","]] "}"              -> dict
         | "." NAME                        -> dot_field
         | "." INT                         -> dot_index
@@ -136,7 +146,7 @@ EFFECT: /![A-Za-z_]+/
 NAME: /[^\W\d]\w*/
 FLOAT: /\d+\.\d+([eE][+-]?\d+)?/
 INT: /\d+/
-STRING: /"([^"\\\n{]|\\.|\{[^}\n]*\})*"/
+STRING: /"([^"\\\n{]|\\.|\{[^}\n]*\})*"/ | /'([^'\\\n{]|\\.|\{[^}\n]*\})*'/
 _PIPE: "|"
 
 COMMENT: /#[^\n]*/

@@ -169,3 +169,17 @@ def contains_any(t):
     if isinstance(t, (Opt, Err)):
         return contains_any(t.inner)
     return False
+
+
+def contains_unknown(t):
+    if t in (UNKNOWN, ANY):
+        return True
+    if isinstance(t, List):
+        return contains_unknown(t.elem)
+    if isinstance(t, Dict):
+        return contains_unknown(t.key) or contains_unknown(t.val)
+    if isinstance(t, Tuple):
+        return any(contains_unknown(x) for x in t.items)
+    if isinstance(t, (Opt, Err)):
+        return contains_unknown(t.inner)
+    return False
