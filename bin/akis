@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Akış CLI wrapper: bin/akis check sol.aks | bin/akis build sol.aks -o sol.py
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${AKIS_PYTHON:-$ROOT/.venv-akis/bin/python}"
+[ -x "$PY" ] || PY=python3.11
+PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m akis "$@"

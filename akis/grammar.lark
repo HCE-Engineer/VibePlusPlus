@@ -1,0 +1,151 @@
+// Akış v0 grammar. LALR(1) + indentation post-lexer (see parser.py).
+
+start: (_NL | item)*
+
+?item: use_decl | type_decl | fn_decl
+
+// ---- top level -------------------------------------------------------------
+use_decl: "use" "py" dotted "as" NAME ":" "(" [type ("," type)*] ")" "->" type effect* _NL
+dotted: NAME ("." NAME)*
+type_decl: "type" NAME "=" "{" field ("," field)* [","] "}" _NL
+field: NAME ":" type
+fn_decl: "fn" NAME "(" [param ("," param)* [","]] ")" ["->" type] effect* _NL _INDENT stmt+ _DEDENT
+param: NAME ":" type
+effect: EFFECT
+
+// ---- types -----------------------------------------------------------------
+type: tatom tsuffix*
+tsuffix: QMARK | BANG
+tatom: NAME                           -> tname
+     | "none"                         -> tnone
+     | "None"                         -> tnone
+     | "[" type "]"                   -> tlist
+     | "{" type ":" type "}"          -> tdict
+     | "(" type ("," type)+ ")"       -> ttuple
+
+// ---- statements ------------------------------------------------------------
+?stmt: simple _NL
+     | if_s
+     | for_s
+     | while_s
+
+?simple: let_s | var_s | assign_s | aug_s | return_s | break_s | continue_s | expr_s
+
+let_s: "let" NAME [":" type] "=" expr
+var_s: "var" NAME [":" type] "=" expr
+assign_s: postfix "=" expr
+aug_s: postfix AUGOP expr
+return_s: "return" [expr]
+break_s: "break"
+continue_s: "continue"
+expr_s: expr
+
+if_s: "if" expr ":" block elif_c* [else_c]
+elif_c: "elif" expr ":" block
+else_c: "else" ":" block
+for_s: "for" for_target "in" expr ":" block
+for_target: NAME                        -> ft_name
+          | NAME ("," NAME)+            -> ft_multi
+          | "(" NAME ("," NAME)+ ")"    -> ft_multi
+while_s: "while" expr ":" block
+block: _NL _INDENT stmt+ _DEDENT
+
+// ---- expressions -----------------------------------------------------------
+?expr: head
+     | head (_PIPE stage)+                 -> pipe
+
+?head: coalesce | ifx
+ifx: "if" coalesce "then" ifbr "else" ifbr
+?ifbr: coalesce | ifx
+
+?stage: "where" sexpr                     -> st_where
+      | "map" sexpr                       -> st_map
+      | "sort_by" sexpr [DESC]            -> st_sort_by
+      | "count_by" sexpr                  -> st_count_by
+      | "group_by" sexpr                  -> st_group_by
+      | "take" sexpr                      -> st_take
+      | "skip" sexpr                      -> st_skip
+      | NAME [call_args] [QMARK] [COALESCE sexpr] -> st_call
+call_args: "(" [args] ")"
+?sexpr: coalesce | ifx
+
+?coalesce: orx
+         | coalesce COALESCE orx          -> coalesce_op
+?orx: andx
+    | orx "or" andx                       -> or_op
+?andx: notx
+     | andx "and" notx                    -> and_op
+?notx: cmp
+     | "not" notx                         -> not_op
+?cmp: arith
+    | arith (cmp_op arith)+               -> compare
+!cmp_op: "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "not" "in"
+?arith: term
+      | arith "+" term                    -> add
+      | arith "-" term                    -> sub
+?term: factor
+     | term "*" factor                    -> mul
+     | term "/" factor                    -> div
+     | term "//" factor                   -> fdiv
+     | term "%" factor                    -> mod
+?factor: power
+       | "-" factor                       -> neg
+       | "+" factor                       -> pos
+?power: postfix
+      | postfix "**" factor               -> pow
+?postfix: primary
+        | postfix "." NAME                -> field_acc
+        | postfix "." INT                 -> tindex
+        | postfix "." FLOAT               -> tindex2
+        | postfix "[" expr "]"            -> index
+        | postfix "[" [expr] ":" [expr] "]" -> slice
+        | postfix "." NAME "(" [args] ")" -> method_call
+        | postfix QMARK                   -> try_op
+?primary: INT                             -> int_lit
+        | FLOAT                           -> float_lit
+        | STRING                          -> str_lit
+        | "true"                          -> true_lit
+        | "True"                          -> true_lit
+        | "false"                         -> false_lit
+        | "False"                         -> false_lit
+        | "none"                          -> none_lit
+        | "None"                          -> none_lit
+        | "it"                            -> it
+        | NAME                            -> var
+        | NAME "(" [args] ")"             -> call
+        | "(" expr ")"
+        | "(" expr "," [expr ("," expr)* [","]] ")" -> tuple
+        | "[" [expr ("," expr)* [","]] "]"          -> list
+        | "[" expr "for" NAME "in" expr ["if" expr] "]" -> listcomp
+        | "{" [kv ("," kv)* [","]] "}"              -> dict
+        | "." NAME                        -> dot_field
+        | "." INT                         -> dot_index
+        | "." FLOAT                       -> dot_index2
+args: arg ("," arg)* [","]
+?arg: expr
+    | NAME ":" expr                       -> named_arg
+kv: expr ":" expr
+
+// ---- terminals -------------------------------------------------------------
+DESC: "desc"
+QMARK: "?"
+COALESCE: "??"
+BANG: "!"
+AUGOP: "+=" | "-=" | "*=" | "/=" | "//=" | "%="
+EFFECT: /![A-Za-z_]+/
+NAME: /[^\W\d]\w*/
+FLOAT: /\d+\.\d+([eE][+-]?\d+)?/
+INT: /\d+/
+STRING: /"([^"\\\n{]|\\.|\{[^}\n]*\})*"/
+_PIPE: "|"
+
+COMMENT: /#[^\n]*/
+_NL: (/\r?\n[\t ]*/ | COMMENT)+
+// A newline (plus blank/comment lines) directly followed by `|` is a pipeline
+// continuation: swallow it so no _NL/_INDENT is produced.
+_CONT.3: /(#[^\n]*)?(\r?\n[\t ]*(#[^\n]*)?)+(?=\|)/
+
+%declare _INDENT _DEDENT
+%ignore /[ \f]+/
+%ignore _CONT
+%ignore COMMENT
